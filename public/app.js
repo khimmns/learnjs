@@ -1,5 +1,10 @@
 'use strict';
-var learnjs = {};
+
+var learnjs = {
+   poolId: 'ap-northeast-1:3d22fb08-a496-489b-929b-f48093375113'
+};
+
+learnjs.identity = new $.Deferred();
 
 learnjs.problems = [
    {
@@ -12,9 +17,11 @@ learnjs.problems = [
    }
 ];
 
+
 learnjs.showView = function(hash){
    var routes = {
       '#problem': learnjs.problemView,
+      '#profile': learnjs.profileView,
       '#': learnjs.landingView,
       '': learnjs.landingView
    };
@@ -31,6 +38,7 @@ learnjs.appOnReady = function(){
       learnjs.showView(window.location.hash);
    };
    learnjs.showView(window.location.hash);
+   learnjs.identity.done(learnjs.addProfileLink);
 };
 
 learnjs.landingView = function(){
@@ -77,6 +85,17 @@ learnjs.problemView = function(data) {
    return view;
 };
 
+learnjs.profileView = function() {
+   console.log("Road profileView")
+   var view = learnjs.template('profile-view');
+   learnjs.identity.done(function(identity){
+      console.log("identity: "+identity);
+      console.log("identity.email: " + identity.email);
+      view.find('.email').text(identity.email);
+   });
+   return view;
+}
+
 learnjs.applyObject = function(obj, elem){
    for (var key in obj){
       elem.find('[data-name="' + key + '"]').text(obj[key]);
@@ -110,5 +129,53 @@ learnjs.triggerEvent = function(name, args) {
    $('.view-container>*').trigger(name, args);
 }
 
+learnjs.addProfileLink = function(profile){
+   var link = learnjs.template('profile-link');
+   link.find('a').text(profile.email);
+   $('.signin-bar').prepend(link);
+}
 
+learnjs.awsRefresh = function() {
+    var deferred = new $.Deferred();
+    AWS.config.credentials.refresh(function (err) {
+        if(err) {
+            deferred.reject(err);
+        } else {
+            deferred.resolve(AWS.config.credentials.identityId);
+        }
+    });
+    return deferred.promise();
+};
 
+function googleSignIn(googleUser){
+   console.log(arguments);
+   //var id_token = googleUser.getAuthResponse().id_token;
+   AWS.config.update({
+      region: 'ap-northeast-1',
+      credentials: new AWS.CognitoIdentityCredentials({
+         IdentityPoolId: learnjs.poolId,
+         Logins: {
+            'accounts.google.com': googleUser.getAuthResponse().id_token
+         }
+      })
+   });
+
+   function refresh () {
+      return gapi.auth2.getAuthInstance().signIn({
+         prompt: 'login'
+      }).then(function (userUpdate) {
+         var creds = AWS.config.credentials;
+         var newToken = userUpdate.getAuthResponse().id_token;
+         creds.params.Logins['accounts.google.com'] = newToken;
+         return learnjs.awsRefresh();
+      });
+   }
+
+   learnjs.awsRefresh().then(function(id){
+      learnjs.identity.resolve({
+         id: id,
+         email: googleUser.getBasicProfile().getEmail(),
+         refresh: refresh
+      });
+   });
+}
